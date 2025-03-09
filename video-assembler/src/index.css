@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles */
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-background-primary text-white m-0 overflow-hidden;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-background-secondary;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-secondary rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-secondary-dark;
+  }
+}
+
+/* Custom component styles */
+@layer components {
+  /* Timeline styles */
+  .timeline-track {
+    @apply relative border-b border-gray-700 bg-background-secondary;
+  }
+
+  .timeline-segment {
+    @apply absolute cursor-move select-none rounded overflow-hidden
+           shadow-lg transition-shadow duration-200;
+  }
+
+  .timeline-segment:hover {
+    @apply shadow-xl;
+  }
+
+  .timeline-segment.selected {
+    @apply ring-2 ring-primary;
+  }
+
+  .timeline-playhead {
+    @apply absolute top-0 bottom-0 w-px bg-red-500 z-timeline-playhead;
+  }
+
+  /* Video preview styles */
+  .video-preview {
+    @apply relative bg-black w-full h-full;
+  }
+
+  .video-controls {
+    @apply absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t
+           from-black/80 to-transparent;
+  }
+
+  /* Effects panel styles */
+  .effect-item {
+    @apply p-3 rounded-lg bg-background-secondary hover:bg-background-tertiary
+           transition-colors duration-200 cursor-pointer;
+  }
+
+  .effect-parameter {
+    @apply mt-2 space-y-1;
+  }
+
+  /* Script editor styles */
+  .monaco-editor {
+    @apply rounded-lg overflow-hidden;
+  }
+
+  /* Button styles */
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200
+           focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-primary;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:bg-primary-dark text-white
+           focus:ring-primary;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary hover:bg-secondary-dark text-white
+           focus:ring-secondary;
+  }
+
+  /* Input styles */
+  .input {
+    @apply bg-background-secondary border border-gray-700 rounded-lg px-3 py-2
+           focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
+  }
+
+  /* Slider styles */
+  .slider {
+    @apply appearance-none w-full h-2 rounded-lg bg-background-tertiary;
+  }
+
+  .slider::-webkit-slider-thumb {
+    @apply appearance-none w-4 h-4 rounded-full bg-primary cursor-pointer;
+  }
+
+  /* Loading animation */
+  .loading {
+    @apply relative inline-flex;
+  }
+
+  .loading::after {
+    content: '';
+    @apply absolute inset-0 rounded-full border-2 border-t-primary
+           border-r-primary border-b-transparent border-l-transparent
+           animate-spin;
+  }
+}
+
+/* Custom utility classes */
+@layer utilities {
+  .flex-center {
+    @apply flex items-center justify-center;
+  }
+
+  .absolute-center {
+    @apply absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2;
+  }
+
+  .text-shadow-sm {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  .text-shadow-lg {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* Monaco Editor customization */
+.monaco-editor .margin,
+.monaco-editor .monaco-editor-background {
+  @apply bg-background-secondary;
+}
+
+/* Transition classes */
+.fade-enter {
+  opacity: 0;
+}
+
+.fade-enter-active {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+
+.fade-exit {
+  opacity: 1;
+}
+
+.fade-exit-active {
+  opacity: 0;
+  transition: opacity 200ms ease-in;
+}
+
+/* Toast notification styles */
+.toast {
+  @apply fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg
+         transform transition-all duration-300 ease-in-out;
+}
+
+.toast-enter {
+  @apply translate-y-full opacity-0;
+}
+
+.toast-enter-active {
+  @apply translate-y-0 opacity-100;
+}
+
+.toast-exit {
+  @apply translate-y-0 opacity-100;
+}
+
+.toast-exit-active {
+  @apply translate-y-full opacity-0;
+}
