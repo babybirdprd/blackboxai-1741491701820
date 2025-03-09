@@ -1,0 +1,102 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Development",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["electron:dev"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$tsc", "$eslint-stylish"]
+    },
+    {
+      "label": "Build Application",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["electron:build"],
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Run Tests",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test"],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": ["$jest"]
+    },
+    {
+      "label": "Run Tests (Watch)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test:watch"],
+      "group": "test",
+      "problemMatcher": ["$jest"]
+    },
+    {
+      "label": "Run Tests (Coverage)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test:coverage"],
+      "group": "test",
+      "problemMatcher": ["$jest"]
+    },
+    {
+      "label": "Lint",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["lint"],
+      "problemMatcher": ["$eslint-stylish"]
+    },
+    {
+      "label": "Lint & Fix",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["lint:fix"],
+      "problemMatcher": ["$eslint-stylish"]
+    },
+    {
+      "label": "Type Check",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["tsc", "--noEmit"],
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Clean Install",
+      "type": "shell",
+      "command": "rm -rf node_modules pnpm-lock.yaml && pnpm install",
+      "windows": {
+        "command": "rmdir /s /q node_modules && del pnpm-lock.yaml && pnpm install"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Update Dependencies",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["update", "-i", "-L", "-r"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Preview Build",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["electron:preview"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Generate Documentation",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["typedoc", "src/"],
+      "problemMatcher": []
+    }
+  ]
+}
