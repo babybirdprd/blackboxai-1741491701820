@@ -1,0 +1,111 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+.pnpm-store/
+.pnp.*
+.npm
+
+# Testing
+coverage
+.nyc_output
+
+# Production
+dist
+dist-ssr
+build
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+*.pem
+
+# TypeScript
+*.tsbuildinfo
+
+# Electron
+out/
+release/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Debug
+.debug/
+debug.log
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.temp/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# FFmpeg related
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.m4v
+*.mp3
+*.wav
+*.aac
+*.flac
+temp_concat.txt
+
+# Project specific
+.timeline-cache/
+.preview-cache/
+.thumbnails/
+
+# IDE specific
+.settings/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# Build process
+.build/
+.deploy/
+.webpack/
+
+# Misc
+.history/
+.git/
+*.bak
+*.swp
+*.swo
+*~
