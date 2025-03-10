@@ -1,114 +1,88 @@
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
 import { setupFFmpegHandlers } from './ffmpeg';
+import FFmpegConfig from './ffmpeg-config';
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (require('electron-squirrel-startup')) {
-  app.quit();
-}
-
-let mainWindow: BrowserWindow | null = null;
-
-const createWindow = (): void => {
-  // Create the browser window.
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 720,
+async function createWindow() {
+  // Create the browser window
+  const mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
     webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: join(__dirname, '../preload/index.js')
+      nodeIntegration: true,
+      contextIsolation: false,
+      webSecurity: process.env.NODE_ENV === 'production',
     },
   });
 
-  // In development, load from the local dev server
+  // Load the app
   if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadURL('http://localhost:5173');
+    await mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
-    // In production, load the built files
-    mainWindow.loadFile(join(__dirname, '../../dist/index.html'));
+    await mainWindow.loadFile(join(__dirname, '../dist/index.html'));
   }
 
-  // Initialize FFmpeg handlers
-  setupFFmpegHandlers();
+  return mainWindow;
+}
 
-  // Handle window closed
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-};
+async function initializeApp() {
+  try {
+    // Initialize FFmpeg configuration
+    const ffmpegConfig = FFmpegConfig.getInstance();
+    await ffmpegConfig.initialize();
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-app.on('ready', () => {
-  createWindow();
+    // Setup IPC handlers
+    setupFFmpegHandlers();
 
-  // Setup error handling
-  process.on('uncaughtException', (error) => {
-    dialog.showErrorBox('Error', `An error occurred: ${error.message}`);
-  });
-});
+    // Create main window
+    const mainWindow = await createWindow();
 
-// Quit when all windows are closed.
+    // Handle window state
+    mainWindow.on('closed', () => {
+      app.quit();
+    });
+
+    // Handle app activation
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+
+    // Get FFmpeg version info
+    const versionInfo = await ffmpegConfig.getVersionInfo();
+    console.log('FFmpeg version:', versionInfo.ffmpeg);
+    console.log('FFprobe version:', versionInfo.ffprobe);
+
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Failed to initialize app:', errorMessage);
+    app.quit();
+  }
+}
+
+// Handle app ready
+app.whenReady().then(initializeApp);
+
+// Quit when all windows are closed
 app.on('window-all-closed', () => {
-  // On OS X it is common for applications and their menu bar
-  // to stay active until the user quits explicitly with Cmd + Q
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
-  if (mainWindow === null) {
-    createWindow();
-  }
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  app.quit();
 });
 
-// Handle file open dialog
-app.whenReady().then(() => {
-  const handleFileOpen = async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      properties: ['openFile', 'multiSelections'],
-      filters: [
-        { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv'] },
-        { name: 'Audio', extensions: ['mp3', 'wav', 'aac'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
-    });
-
-    if (!canceled && mainWindow) {
-      mainWindow.webContents.send('files-selected', filePaths);
-    }
-  };
-
-  // Add IPC handlers for file operations
-  const { ipcMain } = require('electron');
-  
-  ipcMain.handle('dialog:openFile', handleFileOpen);
-  
-  ipcMain.handle('get-app-path', () => {
-    return app.getPath('userData');
-  });
-
-  // Add handler for saving files
-  ipcMain.handle('dialog:saveFile', async (_, defaultPath: string) => {
-    const { canceled, filePath } = await dialog.showSaveDialog({
-      defaultPath,
-      filters: [
-        { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv'] },
-        { name: 'Audio', extensions: ['mp3', 'wav', 'aac'] }
-      ]
-    });
-
-    if (!canceled && filePath) {
-      return filePath;
-    }
-    return null;
-  });
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  app.quit();
 });
 
 // Export for TypeScript
-export {};
+export { };

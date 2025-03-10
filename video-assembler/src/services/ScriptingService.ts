@@ -1,38 +1,45 @@
-import { EventEmitter } from 'events';
-import LosslessVideoService, { VideoSegment } from './LosslessVideoService';
-import TimelineService, { TimelineEffect } from './TimelineService';
+import EventEmitter from 'events';
+import TimelineService from './TimelineService';
+import LosslessVideoService from './LosslessVideoService';
+import FFmpegService from './FFmpegService';
 
-interface ScriptContext {
+export interface ScriptContext {
+  timeline: typeof TimelineService;
+  video: typeof LosslessVideoService;
+  ffmpeg: typeof FFmpegService;
   variables: Record<string, any>;
-  functions: Record<string, Function>;
 }
 
-interface ScriptTemplate {
-  id: string;
+export interface ScriptFunction {
   name: string;
-  description: string;
-  script: string;
-  parameters: ScriptParameter[];
+  parameters: string[];
+  body: string;
 }
 
-interface ScriptParameter {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description: string;
-  default?: any;
-  required?: boolean;
+interface ScriptingEvents {
+  functionRegistered: (functionName: string) => void;
+  scriptComplete: (result: { success: boolean }) => void;
+  error: (message: string) => void;
+  variableSet: (data: { name: string; value: any }) => void;
 }
 
-export class ScriptingService extends EventEmitter {
+class ScriptingServiceBase extends EventEmitter {
+  declare emit: <K extends keyof ScriptingEvents>(event: K, ...args: Parameters<ScriptingEvents[K]>) => boolean;
+}
+
+export class ScriptingService extends ScriptingServiceBase {
   private static instance: ScriptingService;
   private context: ScriptContext;
-  private templates: ScriptTemplate[] = [];
+  private functions: Map<string, ScriptFunction>;
 
   private constructor() {
     super();
+    this.functions = new Map();
     this.context = {
+      timeline: TimelineService,
+      video: LosslessVideoService,
+      ffmpeg: FFmpegService,
       variables: {},
-      functions: this.buildCoreFunctions()
     };
   }
 
@@ -44,67 +51,132 @@ export class ScriptingService extends EventEmitter {
   }
 
   /**
-   * Build core functions available to scripts
+   * Register a custom function
    */
-  private buildCoreFunctions(): Record<string, Function> {
-    return {
-      // File operations
-      loadVideo: async (path: string) => {
-        try {
-          const mediaInfo = await LosslessVideoService.analyzeFile(path);
-          return {
-            path,
-            duration: mediaInfo.duration,
-            streams: mediaInfo.streams
-          };
-        } catch (error) {
-          this.emit('error', `Failed to load video: ${error.message}`);
-          throw error;
-        }
-      },
-
-      // Timeline operations
-      createTrack: (type: 'video' | 'audio' | 'subtitle') => {
-        return TimelineService.createTrack(type);
-      },
-
-      addSegment: (trackId: string, videoPath: string, startTime: number, endTime: number, position: number) => {
-        return LosslessVideoService.createSegment(videoPath, startTime, endTime)
-          .then(segment => TimelineService.addSegment(trackId, segment, position));
-      },
-
-      // Effect operations
-      addEffect: (segmentId: string, effectType: string, parameters: Record<string, any>) => {
-        const effect: Omit<TimelineEffect, 'id'> = {
-          type: effectType,
-          startTime: 0,
-          endTime: 0,
-          parameters
-        };
-        return TimelineService.addEffect(segmentId, effect);
-      },
-
-      // Analysis operations
-      detectScenes: async (videoPath: string) => {
-        return LosslessVideoService.detectScenes(videoPath);
-      },
-
-      detectSilence: async (videoPath: string, threshold?: number) => {
-        return LosslessVideoService.detectSilence(videoPath, threshold);
-      },
-
-      // Export operations
-      exportSegment: async (segment: VideoSegment, outputPath: string) => {
-        return LosslessVideoService.processSegments([segment], { outputPath });
-      }
-    };
+  public registerFunction(func: ScriptFunction): void {
+    this.functions.set(func.name, func);
+    this.emit('functionRegistered', func.name);
   }
 
   /**
-   * Register a custom function to be available in scripts
+   * Execute a script in the current context
    */
-  public registerFunction(name: string, func: Function): void {
-    this.context.functions[name] = func;
+  public async executeScript(script: string): Promise<any> {
+    try {
+      // Create function context with available services
+      const contextStr = Object.keys(this.context)
+        .map((key) => `const ${key} = this.context.${key};`)
+        .join('\n');
+
+      // Create registered function definitions
+      const functionsStr = Array.from(this.functions.values())
+        .map((func) => {
+          const params = func.parameters.join(', ');
+          return `async function ${func.name}(${params}) {\n${func.body}\n}`;
+        })
+        .join('\n\n');
+
+      // Combine context, functions, and user script
+      const fullScript = `
+        ${contextStr}
+        ${functionsStr}
+        ${script}
+      `;
+
+      // Execute in async context
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+      const scriptFunc = new AsyncFunction('context', fullScript);
+      
+      const result = await scriptFunc.call(this, this.context);
+      this.emit('scriptComplete', { success: true });
+      return result;
+    } catch (error) {
+      this.emit('error', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  /**
+   * Execute a query expression (for segment selection)
+   */
+  public async executeQuery(expression: string): Promise<string[]> {
+    try {
+      const queryScript = `
+        return (async () => {
+          const segments = timeline.getState().tracks
+            .flatMap((track) => track.segments);
+          return segments.filter((segment) => {
+            return ${expression};
+          }).map((segment) => segment.id);
+        })();
+      `;
+      
+      return this.executeScript(queryScript);
+    } catch (error) {
+      this.emit('error', `Query execution failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Register built-in utility functions
+   */
+  public registerBuiltIns(): void {
+    // Time manipulation
+    this.registerFunction({
+      name: 'timeToSeconds',
+      parameters: ['timeStr'],
+      body: `
+        const [hours, minutes, seconds] = timeStr.split(':').map(Number);
+        return hours * 3600 + minutes * 60 + seconds;
+      `,
+    });
+
+    // Segment operations
+    this.registerFunction({
+      name: 'splitSegmentAtTime',
+      parameters: ['segmentId', 'time'],
+      body: `
+        const segment = timeline.getState().tracks
+          .flatMap((t) => t.segments)
+          .find((s) => s.id === segmentId);
+        if (!segment) throw new Error('Segment not found');
+        
+        const relativeTime = time - segment.position;
+        if (relativeTime <= 0 || relativeTime >= segment.duration) {
+          throw new Error('Invalid split time');
+        }
+
+        const newSegment = await video.createSegment(
+          segment.filePath,
+          segment.startTime + relativeTime,
+          segment.endTime
+        );
+
+        timeline.addSegment(segment.trackId, newSegment, time);
+        
+        // Update original segment
+        segment.endTime = segment.startTime + relativeTime;
+        segment.duration = relativeTime;
+      `,
+    });
+
+    // Effect operations
+    this.registerFunction({
+      name: 'applyEffectToSelection',
+      parameters: ['effectType', 'parameters'],
+      body: `
+        const selection = timeline.getState().selection;
+        for (const segmentId of selection) {
+          timeline.addEffect(segmentId, {
+            type: effectType,
+            startTime: 0,
+            endTime: Infinity,
+            parameters,
+          }),
+        }
+      `,
+    });
   }
 
   /**
@@ -112,154 +184,14 @@ export class ScriptingService extends EventEmitter {
    */
   public setVariable(name: string, value: any): void {
     this.context.variables[name] = value;
+    this.emit('variableSet', { name, value });
   }
 
   /**
-   * Execute a script with given parameters
+   * Get a variable from the script context
    */
-  public async executeScript(script: string, parameters: Record<string, any> = {}): Promise<any> {
-    try {
-      // Create script context with variables and functions
-      const contextString = Object.entries(this.context.functions)
-        .map(([name, func]) => `const ${name} = ${func.toString()};`)
-        .join('\n');
-
-      const variablesString = Object.entries({ ...this.context.variables, ...parameters })
-        .map(([name, value]) => `const ${name} = ${JSON.stringify(value)};`)
-        .join('\n');
-
-      // Wrap script in async function for await support
-      const wrappedScript = `
-        (async () => {
-          ${contextString}
-          ${variablesString}
-          ${script}
-        })()
-      `;
-
-      // Execute script
-      const result = await eval(wrappedScript);
-      this.emit('scriptCompleted', { script, result });
-      return result;
-    } catch (error) {
-      this.emit('error', `Script execution failed: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Register a script template
-   */
-  public registerTemplate(template: ScriptTemplate): void {
-    this.templates.push(template);
-    this.emit('templateAdded', template);
-  }
-
-  /**
-   * Get all registered templates
-   */
-  public getTemplates(): ScriptTemplate[] {
-    return [...this.templates];
-  }
-
-  /**
-   * Execute a template with parameters
-   */
-  public async executeTemplate(templateId: string, parameters: Record<string, any>): Promise<any> {
-    const template = this.templates.find(t => t.id === templateId);
-    if (!template) {
-      throw new Error(`Template ${templateId} not found`);
-    }
-
-    // Validate parameters
-    for (const param of template.parameters) {
-      if (param.required && !(param.name in parameters)) {
-        throw new Error(`Required parameter ${param.name} not provided`);
-      }
-    }
-
-    return this.executeScript(template.script, parameters);
-  }
-
-  /**
-   * Create a batch processing script
-   */
-  public createBatchScript(operations: Array<{
-    type: string;
-    parameters: Record<string, any>;
-  }>): string {
-    return operations.map(op => {
-      const params = JSON.stringify(op.parameters, null, 2);
-      return `await ${op.type}(${params});`;
-    }).join('\n');
-  }
-
-  /**
-   * Register common script templates
-   */
-  public registerCommonTemplates(): void {
-    // Template for scene detection and splitting
-    this.registerTemplate({
-      id: 'scene-split',
-      name: 'Scene Detection and Split',
-      description: 'Detect scenes in a video and split into segments',
-      script: `
-        const scenes = await detectScenes(inputPath);
-        const videoTrack = await createTrack('video');
-        
-        for (let i = 0; i < scenes.length - 1; i++) {
-          await addSegment(
-            videoTrack.id,
-            inputPath,
-            scenes[i],
-            scenes[i + 1],
-            scenes[i]
-          );
-        }
-      `,
-      parameters: [{
-        name: 'inputPath',
-        type: 'string',
-        description: 'Path to input video file',
-        required: true
-      }]
-    });
-
-    // Template for silence detection and removal
-    this.registerTemplate({
-      id: 'silence-remove',
-      name: 'Silence Detection and Removal',
-      description: 'Detect and remove silent segments from audio/video',
-      script: `
-        const silentSegments = await detectSilence(inputPath, threshold);
-        const videoTrack = await createTrack('video');
-        let currentPosition = 0;
-        
-        for (const segment of silentSegments) {
-          if (segment.start > currentPosition) {
-            await addSegment(
-              videoTrack.id,
-              inputPath,
-              currentPosition,
-              segment.start,
-              currentPosition
-            );
-          }
-          currentPosition = segment.end;
-        }
-      `,
-      parameters: [{
-        name: 'inputPath',
-        type: 'string',
-        description: 'Path to input video file',
-        required: true
-      }, {
-        name: 'threshold',
-        type: 'number',
-        description: 'Silence threshold in dB',
-        default: -50
-      }]
-    });
+  public getVariable(name: string): any {
+    return this.context.variables[name];
   }
 }
 

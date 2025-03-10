@@ -1,190 +1,236 @@
 import React, { useEffect, useRef, useState } from 'react';
-import TimelineService, { TimelineState, TimelineTrack, TimelineSegment } from '../../services/TimelineService';
-import LosslessVideoService from '../../services/LosslessVideoService';
+import TimelineService from '../../services/TimelineService';
+import { TimelineState, TimelineTrack, TimelineSegment, TimelineEffect, EffectParameter, Keyframe } from '../../interfaces/Timeline.interface';
+import { KeyframeEditor } from './KeyframeEditor';
+import { EffectControls } from './EffectControls';
+import { TrackHeader } from './TrackHeader';
+import { TimelineRuler } from './TimelineRuler';
+import { WaveformDisplay } from './WaveformDisplay';
+import { ThumbnailStrip } from './ThumbnailStrip';
 
 interface TimelineProps {
   onSegmentSelect?: (segment: TimelineSegment) => void;
   onPlayheadChange?: (position: number) => void;
+  onEffectChange?: (effect: TimelineEffect) => void;
 }
 
-const Timeline: React.FC<TimelineProps> = ({ onSegmentSelect, onPlayheadChange }) => {
+const Timeline: React.FC<TimelineProps> = ({ 
+  onSegmentSelect, 
+  onPlayheadChange,
+  onEffectChange 
+}) => {
   const [timelineState, setTimelineState] = useState<TimelineState>(TimelineService.getState());
+  const [selectedEffect, setSelectedEffect] = useState<TimelineEffect | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef<boolean>(false);
   const draggedSegment = useRef<string | null>(null);
   const dragOffset = useRef<number>(0);
+  const isSnapping = useRef<boolean>(false);
 
   // Constants for timeline display
   const PIXELS_PER_SECOND = 50; // Base scale before zoom
   const TRACK_HEIGHT = 80;
-  const TIMELINE_HEIGHT = 600;
+  const HEADER_WIDTH = 200;
+  const MIN_SEGMENT_WIDTH = 10;
 
   useEffect(() => {
-    // Subscribe to timeline service events
     const handleStateUpdate = () => {
       setTimelineState(TimelineService.getState());
     };
 
-    TimelineService.on('trackAdded', handleStateUpdate);
-    TimelineService.on('trackRemoved', handleStateUpdate);
-    TimelineService.on('segmentAdded', handleStateUpdate);
-    TimelineService.on('segmentRemoved', handleStateUpdate);
-    TimelineService.on('segmentMoved', handleStateUpdate);
-    TimelineService.on('playheadMoved', handleStateUpdate);
-    TimelineService.on('zoomChanged', handleStateUpdate);
-    TimelineService.on('durationChanged', handleStateUpdate);
+    // Subscribe to all timeline events
+    const events = [
+      'trackAdded', 'trackRemoved', 'segmentAdded', 'segmentRemoved',
+      'segmentMoved', 'playheadMoved', 'zoomChanged', 'durationChanged',
+      'effectAdded', 'effectRemoved', 'selectionChanged'
+    ];
+
+    events.forEach(event => {
+      TimelineService.on(event, handleStateUpdate);
+    });
 
     return () => {
-      TimelineService.removeListener('trackAdded', handleStateUpdate);
-      TimelineService.removeListener('trackRemoved', handleStateUpdate);
-      TimelineService.removeListener('segmentAdded', handleStateUpdate);
-      TimelineService.removeListener('segmentRemoved', handleStateUpdate);
-      TimelineService.removeListener('segmentMoved', handleStateUpdate);
-      TimelineService.removeListener('playheadMoved', handleStateUpdate);
-      TimelineService.removeListener('zoomChanged', handleStateUpdate);
-      TimelineService.removeListener('durationChanged', handleStateUpdate);
+      events.forEach(event => {
+        TimelineService.removeListener(event, handleStateUpdate);
+      });
     };
   }, []);
 
-  // Convert time to pixels
   const timeToPixels = (time: number): number => {
     return time * PIXELS_PER_SECOND * timelineState.zoom;
   };
 
-  // Convert pixels to time
   const pixelsToTime = (pixels: number): number => {
     return pixels / (PIXELS_PER_SECOND * timelineState.zoom);
   };
 
-  // Handle timeline click for playhead positioning
   const handleTimelineClick = (e: React.MouseEvent) => {
     if (!timelineRef.current || isDragging.current) return;
 
     const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const newPosition = pixelsToTime(x);
+    const x = e.clientX - rect.left - HEADER_WIDTH;
+    const newPosition = Math.max(0, pixelsToTime(x));
 
     TimelineService.setPlayhead(newPosition);
     onPlayheadChange?.(newPosition);
   };
 
-  // Handle segment drag start
+  const findNearestSnapPoint = (time: number): number => {
+    if (!timelineState.snapEnabled) return time;
+
+    const snapPoints: number[] = [];
+    // Add segment boundaries to snap points
+    timelineState.tracks.forEach(track => {
+      track.segments.forEach(segment => {
+        snapPoints.push(segment.position);
+        snapPoints.push(segment.position + segment.duration);
+      });
+    });
+
+    // Add playhead and in/out points
+    snapPoints.push(timelineState.playhead);
+    if (timelineState.inPoint) snapPoints.push(timelineState.inPoint);
+    if (timelineState.outPoint) snapPoints.push(timelineState.outPoint);
+
+    // Find nearest snap point within tolerance
+    const tolerance = timelineState.snapTolerance / (PIXELS_PER_SECOND * timelineState.zoom);
+    let nearestPoint = time;
+    let minDistance = tolerance;
+
+    snapPoints.forEach(point => {
+      const distance = Math.abs(point - time);
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestPoint = point;
+        isSnapping.current = true;
+      }
+    });
+
+    return nearestPoint;
+  };
+
   const handleSegmentDragStart = (e: React.MouseEvent, segmentId: string) => {
     e.stopPropagation();
     isDragging.current = true;
     draggedSegment.current = segmentId;
+    isSnapping.current = false;
 
-    // Calculate drag offset
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     dragOffset.current = e.clientX - rect.left;
   };
 
-  // Handle segment drag
   const handleSegmentDrag = (e: React.MouseEvent) => {
     if (!isDragging.current || !draggedSegment.current || !timelineRef.current) return;
 
     const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left - dragOffset.current;
-    const newPosition = pixelsToTime(x);
+    const x = e.clientX - rect.left - HEADER_WIDTH - dragOffset.current;
+    let newPosition = pixelsToTime(x);
+
+    // Apply snapping if enabled
+    newPosition = findNearestSnapPoint(newPosition);
 
     TimelineService.moveSegment(draggedSegment.current, newPosition);
   };
 
-  // Handle segment drag end
   const handleSegmentDragEnd = () => {
     isDragging.current = false;
     draggedSegment.current = null;
+    isSnapping.current = false;
   };
 
-  // Render timeline ruler
-  const renderRuler = () => {
-    const duration = timelineState.duration;
-    const width = timeToPixels(duration);
-    const intervals = [];
-    const intervalSize = 1; // 1 second intervals
-
-    for (let time = 0; time <= duration; time += intervalSize) {
-      const position = timeToPixels(time);
-      intervals.push(
-        <div
-          key={time}
-          className="absolute h-4 border-l border-gray-400"
-          style={{ left: `${position}px` }}
-        >
-          <span className="text-xs text-gray-600">{formatTime(time)}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="h-8 relative border-b border-gray-300">
-        {intervals}
-      </div>
-    );
-  };
-
-  // Format time display
-  const formatTime = (seconds: number): string => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.floor(seconds % 60);
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
-  // Render track
   const renderTrack = (track: TimelineTrack) => {
+    const trackHeight = track.height || TRACK_HEIGHT;
+
     return (
       <div
         key={track.id}
-        className="relative h-20 border-b border-gray-300"
-        style={{ height: `${TRACK_HEIGHT}px` }}
+        className={`relative border-b border-gray-300 ${track.locked ? 'opacity-50' : ''}`}
+        style={{ height: `${trackHeight}px` }}
       >
-        <div className="absolute left-0 top-0 w-20 h-full bg-gray-100 border-r border-gray-300 flex items-center justify-center">
-          <span className="text-sm font-medium">{track.type}</span>
-        </div>
-        <div className="absolute left-20 top-0 right-0 h-full">
-          {track.segments.map(segment => renderSegment(segment))}
+        <TrackHeader
+          track={track}
+          width={HEADER_WIDTH}
+          onVolumeChange={(volume) => TimelineService.updateTrack(track.id, { volume })}
+          onPanChange={(pan) => TimelineService.updateTrack(track.id, { pan })}
+          onMuteToggle={() => TimelineService.updateTrack(track.id, { muted: !track.muted })}
+          onSoloToggle={() => TimelineService.updateTrack(track.id, { solo: !track.solo })}
+          onLockToggle={() => TimelineService.updateTrack(track.id, { locked: !track.locked })}
+        />
+        <div className="absolute left-[200px] top-0 right-0 h-full">
+          {track.type === 'audio' && timelineState.waveformsEnabled && (
+            <WaveformDisplay
+              segments={track.segments}
+              height={trackHeight}
+              timeToPixels={timeToPixels}
+            />
+          )}
+          {track.segments.map(segment => renderSegment(segment, trackHeight))}
         </div>
       </div>
     );
   };
 
-  // Render segment
-  const renderSegment = (segment: TimelineSegment) => {
-    const width = timeToPixels(segment.duration);
+  const renderSegment = (segment: TimelineSegment, trackHeight: number) => {
+    const width = Math.max(timeToPixels(segment.duration), MIN_SEGMENT_WIDTH);
     const left = timeToPixels(segment.position);
 
     return (
       <div
         key={segment.id}
-        className={`absolute top-2 h-16 bg-blue-500 rounded cursor-move ${
-          segment.selected ? 'ring-2 ring-yellow-400' : ''
-        }`}
+        className={`absolute top-1 rounded cursor-move select-none
+          ${segment.selected ? 'ring-2 ring-yellow-400' : ''}
+          ${segment.locked ? 'cursor-not-allowed' : ''}`}
         style={{
           left: `${left}px`,
-          width: `${width}px`
+          width: `${width}px`,
+          height: `${trackHeight - 8}px`,
+          backgroundColor: segment.selected ? 'rgba(59, 130, 246, 0.8)' : 'rgba(59, 130, 246, 0.6)'
         }}
         onClick={(e) => {
           e.stopPropagation();
-          onSegmentSelect?.(segment);
+          if (!segment.locked) {
+            onSegmentSelect?.(segment);
+          }
         }}
-        onMouseDown={(e) => handleSegmentDragStart(e, segment.id)}
+        onMouseDown={(e) => !segment.locked && handleSegmentDragStart(e, segment.id)}
         onMouseUp={handleSegmentDragEnd}
       >
-        <div className="p-2 text-xs text-white truncate">
-          {segment.filePath.split('/').pop()}
+        {timelineState.thumbnailsEnabled && segment.thumbnailUrls && (
+          <ThumbnailStrip
+            thumbnails={segment.thumbnailUrls}
+            duration={segment.duration}
+            width={width}
+          />
+        )}
+        <div className="absolute top-0 left-0 right-0 p-2 text-xs text-white truncate bg-black bg-opacity-30">
+          {segment.metadata?.name || segment.filePath.split('/').pop()}
         </div>
+        {segment.effects?.map(effect => (
+          <div
+            key={effect.id}
+            className={`absolute bottom-0 h-1 ${effect.enabled ? 'bg-green-500' : 'bg-gray-500'}`}
+            style={{
+              left: timeToPixels(effect.startTime - segment.position),
+              width: timeToPixels(effect.endTime - effect.startTime)
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedEffect(effect);
+              onEffectChange?.(effect);
+            }}
+          />
+        ))}
       </div>
     );
   };
 
-  // Render playhead
   const renderPlayhead = () => {
     const position = timeToPixels(timelineState.playhead);
 
     return (
       <div
-        className="absolute top-0 bottom-0 w-px bg-red-500 z-10"
-        style={{ left: `${position}px` }}
+        className="absolute top-0 bottom-0 w-px bg-red-500 z-10 pointer-events-none"
+        style={{ left: `${position + HEADER_WIDTH}px` }}
       >
         <div className="w-4 h-4 -ml-2 bg-red-500 transform rotate-45" />
       </div>
@@ -192,17 +238,17 @@ const Timeline: React.FC<TimelineProps> = ({ onSegmentSelect, onPlayheadChange }
   };
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full h-full flex flex-col bg-gray-100">
       {/* Toolbar */}
-      <div className="h-12 flex items-center space-x-4 px-4 border-b border-gray-300">
+      <div className="h-12 flex items-center space-x-4 px-4 border-b border-gray-300 bg-white">
         <button
-          className="px-3 py-1 bg-blue-500 text-white rounded"
+          className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
           onClick={() => TimelineService.createTrack('video')}
         >
           Add Video Track
         </button>
         <button
-          className="px-3 py-1 bg-blue-500 text-white rounded"
+          className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
           onClick={() => TimelineService.createTrack('audio')}
         >
           Add Audio Track
@@ -219,29 +265,75 @@ const Timeline: React.FC<TimelineProps> = ({ onSegmentSelect, onPlayheadChange }
             className="w-32"
           />
         </div>
+        <label className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            checked={timelineState.snapEnabled}
+            onChange={(e) => TimelineService.setSnapEnabled(e.target.checked)}
+          />
+          <span className="text-sm">Snap</span>
+        </label>
+        <label className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            checked={timelineState.thumbnailsEnabled}
+            onChange={(e) => TimelineService.setThumbnailsEnabled(e.target.checked)}
+          />
+          <span className="text-sm">Thumbnails</span>
+        </label>
+        <label className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            checked={timelineState.waveformsEnabled}
+            onChange={(e) => TimelineService.setWaveformsEnabled(e.target.checked)}
+          />
+          <span className="text-sm">Waveforms</span>
+        </label>
       </div>
 
       {/* Timeline */}
-      <div
-        ref={timelineRef}
-        className="flex-1 relative overflow-auto"
-        onClick={handleTimelineClick}
-        onMouseMove={handleSegmentDrag}
-        onMouseUp={handleSegmentDragEnd}
-        onMouseLeave={handleSegmentDragEnd}
-      >
+      <div className="flex-1 relative">
         <div
-          className="absolute top-0 left-0"
-          style={{
-            width: `${timeToPixels(timelineState.duration)}px`,
-            height: `${TIMELINE_HEIGHT}px`
-          }}
+          ref={timelineRef}
+          className="absolute inset-0 overflow-auto"
+          onClick={handleTimelineClick}
+          onMouseMove={handleSegmentDrag}
+          onMouseUp={handleSegmentDragEnd}
+          onMouseLeave={handleSegmentDragEnd}
         >
-          {renderRuler()}
-          {timelineState.tracks.map(renderTrack)}
-          {renderPlayhead()}
+          <div
+            className="absolute top-0 left-0"
+            style={{
+              width: `${timeToPixels(timelineState.duration) + HEADER_WIDTH}px`
+            }}
+          >
+            <TimelineRuler
+              duration={timelineState.duration}
+              zoom={timelineState.zoom}
+              timeToPixels={timeToPixels}
+              headerWidth={HEADER_WIDTH}
+            />
+            {timelineState.tracks.map(renderTrack)}
+            {renderPlayhead()}
+          </div>
         </div>
       </div>
+
+      {/* Effect Controls */}
+      {selectedEffect && (
+        <EffectControls
+          effect={selectedEffect}
+          onParameterChange={(parameterId, value) => {
+            TimelineService.updateEffectParameter(selectedEffect.id, parameterId, value);
+          }}
+          onKeyframeAdd={(parameterId, time, value) => {
+            TimelineService.addEffectKeyframe(selectedEffect.id, parameterId, time, value);
+          }}
+          onKeyframeRemove={(parameterId, keyframeId) => {
+            TimelineService.removeEffectKeyframe(selectedEffect.id, parameterId, keyframeId);
+          }}
+        />
+      )}
     </div>
   );
 };

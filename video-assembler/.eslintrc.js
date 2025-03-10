@@ -7,7 +7,8 @@ module.exports = {
     ecmaFeatures: {
       jsx: true,
     },
-    project: './tsconfig.json',
+    tsconfigRootDir: __dirname,
+    project: ['./tsconfig.json', './tsconfig.node.json'],
   },
   settings: {
     react: {
@@ -94,7 +95,8 @@ module.exports = {
   ignorePatterns: [
     'dist',
     'node_modules',
-    '*.js',
     '*.d.ts',
+    'vite.config.js',
+    'electron.vite.config.js',
   ],
 };

@@ -1,36 +1,22 @@
 import { ipcRenderer } from 'electron';
-import { EventEmitter } from 'events';
+import { BaseEventEmitter } from './BaseEventEmitter';
+import {
+  FFmpegProgress,
+  IFFmpegService,
+  MediaInfo,
+  ServiceError,
+} from '../interfaces';
 
-export interface FFmpegProgress {
-  frame: number;
-  fps: number;
-  q: number;
-  size: string;
-  time: string;
-  bitrate: string;
-  speed: string;
+interface FFmpegEvents {
+  progress: (progress: FFmpegProgress) => void;
+  error: (error: ServiceError) => void;
+  initialized: () => void;
+  disposed: () => void;
 }
 
-export interface MediaInfo {
-  format: {
-    filename: string;
-    duration: string;
-    size: string;
-    bit_rate: string;
-  };
-  streams: Array<{
-    index: number;
-    codec_type: string;
-    codec_name: string;
-    width?: number;
-    height?: number;
-    sample_rate?: string;
-    channels?: number;
-  }>;
-}
-
-export class FFmpegService extends EventEmitter {
+export class FFmpegService extends BaseEventEmitter implements IFFmpegService {
   private static instance: FFmpegService;
+  private initialized = false;
 
   private constructor() {
     super();
@@ -49,109 +35,160 @@ export class FFmpegService extends EventEmitter {
       this.emit('progress', progress);
     });
 
-    ipcRenderer.on('ffmpeg:error', (_, error: string) => {
+    ipcRenderer.on('ffmpeg:error', (_, errorMessage: string) => {
+      const error = this.createError(errorMessage, 'FFMPEG_ERROR');
       this.emit('error', error);
     });
   }
 
-  /**
-   * Get media file information
-   */
+  public async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    try {
+      // Verify FFmpeg is available
+      await this.getVersionInfo();
+      this.initialized = true;
+      this.emit('initialized');
+    } catch (error) {
+      const serviceError = this.createError(
+        'Failed to initialize FFmpeg',
+        'FFMPEG_INIT_ERROR',
+        error
+      );
+      this.emit('error', serviceError);
+      throw serviceError;
+    }
+  }
+
+  public async dispose(): Promise<void> {
+    if (!this.initialized) {
+      return;
+    }
+
+    this.initialized = false;
+    this.emit('disposed');
+  }
+
+  public isInitialized(): boolean {
+    return this.initialized;
+  }
+
   public async getMediaInfo(filePath: string): Promise<MediaInfo> {
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
     return ipcRenderer.invoke('ffmpeg:probe', filePath);
   }
 
-  /**
-   * Perform lossless cut of a video file
-   */
-  public async losslessCut(input: string, output: string, startTime: number, endTime: number): Promise<void> {
-    return ipcRenderer.invoke('ffmpeg:cut', {
-      input,
-      output,
-      startTime,
-      endTime
-    });
+  public async losslessCut(
+    input: string,
+    output: string,
+    startTime: number,
+    endTime: number
+  ): Promise<void> {
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:cut', { input, output, startTime, endTime });
   }
 
-  /**
-   * Merge multiple video files with compatible codecs
-   */
   public async losslessMerge(inputs: string[], output: string): Promise<void> {
-    return ipcRenderer.invoke('ffmpeg:merge', {
-      inputs,
-      output
-    });
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:merge', { inputs, output });
   }
 
-  /**
-   * Extract specific stream from media file
-   */
-  public async extractStream(input: string, output: string, streamIndex: number): Promise<void> {
-    return ipcRenderer.invoke('ffmpeg:extract-stream', {
-      input,
-      output,
-      streamIndex
-    });
+  public async extractStream(
+    input: string,
+    output: string,
+    streamIndex: number
+  ): Promise<void> {
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:extract-stream', { input, output, streamIndex });
   }
 
-  /**
-   * Generate thumbnails for video
-   */
-  public async generateThumbnails(input: string, outputPattern: string, interval: number): Promise<string[]> {
-    return ipcRenderer.invoke('ffmpeg:thumbnails', {
-      input,
-      outputPattern,
-      interval
-    });
+  public async generateThumbnails(
+    input: string,
+    outputPattern: string,
+    interval: number
+  ): Promise<string[]> {
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:thumbnails', { input, outputPattern, interval });
   }
 
-  /**
-   * Extract audio waveform data
-   */
   public async extractWaveform(input: string): Promise<number[]> {
-    return ipcRenderer.invoke('ffmpeg:waveform', {
-      input
-    });
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:waveform', { input });
   }
 
-  /**
-   * Detect scene changes in video
-   */
   public async detectScenes(input: string): Promise<number[]> {
-    return ipcRenderer.invoke('ffmpeg:scene-detect', {
-      input
-    });
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:scene-detect', { input });
   }
 
-  /**
-   * Detect silent segments in audio
-   */
-  public async detectSilence(input: string, threshold: number = -50): Promise<Array<{start: number, end: number}>> {
-    return ipcRenderer.invoke('ffmpeg:silence-detect', {
-      input,
-      threshold
-    });
+  public async detectSilence(
+    input: string,
+    threshold: number = -50
+  ): Promise<Array<{ start: number; end: number }>> {
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:silence-detect', { input, threshold });
   }
 
-  /**
-   * Remux video to different container format
-   */
   public async remux(input: string, output: string): Promise<void> {
-    return ipcRenderer.invoke('ffmpeg:remux', {
-      input,
-      output
-    });
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:remux', { input, output });
   }
 
-  /**
-   * Update video metadata
-   */
-  public async updateMetadata(input: string, output: string, metadata: Record<string, string>): Promise<void> {
-    return ipcRenderer.invoke('ffmpeg:metadata', {
-      input,
-      output,
-      metadata
-    });
+  public async updateMetadata(
+    input: string,
+    output: string,
+    metadata: Record<string, string>
+  ): Promise<void> {
+    if (!this.initialized) {
+      throw this.createError('FFmpeg service not initialized', 'SERVICE_NOT_INITIALIZED');
+    }
+    return ipcRenderer.invoke('ffmpeg:metadata', { input, output, metadata });
+  }
+
+  public async getVersionInfo(): Promise<{ ffmpeg: string; ffprobe: string }> {
+    return ipcRenderer.invoke('ffmpeg:version');
+  }
+
+  // Type-safe event emitter methods
+  public override on<K extends keyof FFmpegEvents>(
+    event: K,
+    listener: FFmpegEvents[K]
+  ): this {
+    return super.on(event, listener);
+  }
+
+  public override off<K extends keyof FFmpegEvents>(
+    event: K,
+    listener: FFmpegEvents[K]
+  ): this {
+    return super.off(event, listener);
+  }
+
+  public override emit<K extends keyof FFmpegEvents>(
+    event: K,
+    ...args: Parameters<FFmpegEvents[K]>
+  ): boolean {
+    return super.emit(event, ...args);
   }
 }
 
